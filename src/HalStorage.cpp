@@ -77,6 +77,18 @@ bool ensureParentDirectories(const std::string &full) {
   }
   return ::mkdir(parent.c_str(), 0777) == 0 || errno == EEXIST;
 }
+
+uint32_t packedFatTime(time_t timestamp) {
+  struct tm local{};
+  if (!localtime_r(&timestamp, &local) || local.tm_year < 80 ||
+      local.tm_year > 207)
+    return 0;
+  const uint32_t date = static_cast<uint32_t>(
+      ((local.tm_year - 80) << 9) | ((local.tm_mon + 1) << 5) | local.tm_mday);
+  const uint32_t time = static_cast<uint32_t>(
+      (local.tm_hour << 11) | (local.tm_min << 5) | (local.tm_sec / 2));
+  return (date << 16) | time;
+}
 } // namespace
 
 bool HalStorage::begin() {
@@ -170,23 +182,28 @@ size_t HalFile::size() {
 }
 size_t HalFile::fileSize() { return size(); }
 uint64_t HalFile::fileSize64() { return size(); }
+uint32_t HalFile::creationTime() {
+  if (!impl || impl->fd < 0)
+    return 0;
+#if defined(__APPLE__)
+  struct stat metadata{};
+  if (fstat(impl->fd, &metadata) != 0)
+    return 0;
+  return packedFatTime(metadata.st_birthtimespec.tv_sec);
+#else
+  // POSIX does not expose file birth time portably. Let Library use its
+  // first-seen fallback rather than misreporting a metadata change as creation.
+  return 0;
+#endif
+}
 uint32_t HalFile::modificationTime() {
   if (!impl || impl->fd < 0)
     return 0;
   struct stat metadata{};
-  struct tm modified{};
-  if (fstat(impl->fd, &metadata) != 0 ||
-      !localtime_r(&metadata.st_mtime, &modified) || modified.tm_year < 80 ||
-      modified.tm_year > 207)
+  if (fstat(impl->fd, &metadata) != 0)
     return 0;
   // Match HalFile's packed FAT date/time, including its two-second precision.
-  const uint32_t date =
-      static_cast<uint32_t>(((modified.tm_year - 80) << 9) |
-                            ((modified.tm_mon + 1) << 5) | modified.tm_mday);
-  const uint32_t time =
-      static_cast<uint32_t>((modified.tm_hour << 11) | (modified.tm_min << 5) |
-                            (modified.tm_sec / 2));
-  return (date << 16) | time;
+  return packedFatTime(metadata.st_mtime);
 }
 
 bool HalFile::seek(size_t pos) {
