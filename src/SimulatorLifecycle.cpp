@@ -14,6 +14,10 @@ constexpr const char *kInputScriptAfterWakeEnv =
 constexpr const char *kScreenshotsEnv = "CROSSPOINT_SIM_SCREENSHOTS";
 constexpr const char *kScreenshotsAfterWakeEnv =
     "CROSSPOINT_SIM_SCREENSHOTS_AFTER_WAKE";
+constexpr const char *kInputScriptAfterRebootEnv =
+    "CROSSPOINT_SIM_INPUT_SCRIPT_AFTER_REBOOT";
+constexpr const char *kScreenshotsAfterRebootEnv =
+    "CROSSPOINT_SIM_SCREENSHOTS_AFTER_REBOOT";
 constexpr const char *kSilentRebootMagicEnv =
     "CROSSPOINT_SIM_SILENT_REBOOT_MAGIC";
 constexpr const char *kSilentRebootTargetEnv =
@@ -91,7 +95,16 @@ void restoreSilentRebootToken(uint32_t& magic, uint32_t& target, uint32_t& paylo
   clearSilentRebootToken();
 }
 
-[[noreturn]] void reboot() { reexec(); }
+[[noreturn]] void reboot() {
+  // ESP.restart() relaunches the process with the same environment. Without
+  // this, a scripted flow that triggers a firmware reboot (for example a
+  // network-boot handoff) would replay its script from the start forever.
+  // Tests that need to keep driving the relaunched instance provide the
+  // optional *_AFTER_REBOOT schedules.
+  promoteAfterWakeValue(kInputScriptEnv, kInputScriptAfterRebootEnv);
+  promoteAfterWakeValue(kScreenshotsEnv, kScreenshotsAfterRebootEnv);
+  reexec();
+}
 
 [[noreturn]] void rebootAsPowerWake() {
   clearSilentRebootToken();

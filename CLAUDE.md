@@ -71,8 +71,11 @@ and X4 Pro touch edges through the same `HalGPIO` state as real SDL input, and
 Keep synthetic held-time timestamps on the `SDL_GetTicks()` clock used by real
 keyboard events; the firmware's `millis()` clock has a different origin. The
 deep-sleep loop must also process synthetic input. Process relaunch promotes
-the optional `*_AFTER_WAKE` schedules and clears the pre-sleep schedules so
-automation cannot enter an infinite sleep/relaunch cycle.
+the optional `*_AFTER_WAKE` schedules (sleep/wake) or `*_AFTER_REBOOT`
+schedules (`ESP.restart()` and silent network-boot handoffs) and clears the
+original schedules so automation cannot enter an infinite relaunch cycle.
+`tools/mock_kosync_server.py` serves KOReader Sync responses for previewing the
+sync flow; see the README.
 
 ## When making changes
 

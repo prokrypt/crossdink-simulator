@@ -174,6 +174,12 @@ tests possible without desktop-control permissions:
   `CROSSPOINT_SIM_SCREENSHOTS_AFTER_WAKE` for that second process. The
   pre-sleep schedules are cleared during relaunch so they cannot repeat
   forever.
+- Firmware reboots (`ESP.restart()`, including the silent network-boot
+  handoff used by KOReader Sync, OPDS, and similar flows) also relaunch the
+  process. Set `CROSSPOINT_SIM_INPUT_SCRIPT_AFTER_REBOOT` and
+  `CROSSPOINT_SIM_SCREENSHOTS_AFTER_REBOOT` to keep driving the relaunched
+  instance. Like sleep/wake, the original schedules are cleared on reboot so a
+  scripted flow is never replayed from the start.
 
 Times are measured from process startup. For example:
 
@@ -231,6 +237,47 @@ CROSSINK_SIM_HTTP_MOCK_ROOT="$PWD/lib/EpdFont/scripts/output" \
 
 The mock still uses the firmware's normal manifest parsing, file download,
 write-to-SD, `.cpfont` validation, registry refresh, and font-selection flow.
+
+**Mock KOReader Sync server**: `tools/mock_kosync_server.py` is a small,
+standard-library KOSync server for previewing the sync screens without an
+account or a second device. `--seed-sd` writes `.crosspoint/koreader.json` on
+the simulated SD card so the firmware points at the mock (an existing file is
+moved to `koreader.json.bak`; move it back to restore your real settings):
+
+```bash
+cd /path/to/firmware
+python3 ../crossink-simulator/tools/mock_kosync_server.py --seed-sd ./fs_
+# in another terminal
+pio run -e simulator -t run_simulator
+```
+
+Open a book, open the reader menu, and choose Sync Progress. Each request
+returns the remote position chosen on the command line, so the Apply/Upload
+comparison appears every time:
+
+- `--percentage 0.62` sets remote progress (0-1 or 0-100).
+- `--chapter 5` sets the 1-based spine item the remote position starts at; it
+  must exist in the book.
+- `--device "Kobo Libra 2"` sets the remote device name (`""` hides it).
+- `--no-progress` previews the "no remote progress" upload prompt.
+- `--reject-auth` previews authentication failures.
+- `--echo` returns the last uploaded position for a book once one exists.
+
+Uploads are accepted and logged. To capture the result screen
+unattended, combine the mock with the `*_AFTER_REBOOT` schedules, because
+starting a sync reboots into the network flow. For example, on a fresh copy of
+an SD card whose Home screen opens a book with the Right button:
+
+```bash
+CROSSPOINT_SIM_SD=/tmp/sim-sd \
+CROSSPOINT_SIM_INPUT_SCRIPT='3000:RIGHT;8000:ENTER;10000:RIGHT;11000:DOWN;11500:DOWN;12000:DOWN;13000:ENTER;25000:QUIT' \
+CROSSPOINT_SIM_INPUT_SCRIPT_AFTER_REBOOT='9000:QUIT' \
+CROSSPOINT_SIM_SCREENSHOTS_AFTER_REBOOT='8000:./qa-artifacts/kosync.bmp' \
+  .pio/build/simulator/program
+```
+
+Menu positions vary with the firmware version and book, so take step-by-step
+screenshots when adapting the input script.
 
 **File transfer**: The simulator provides host-backed `WebServer`,
 `WebSocketsServer`, and `NetworkClient` shims so firmware-owned file-transfer
