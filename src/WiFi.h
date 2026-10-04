@@ -248,12 +248,12 @@ public:
   int scanNetworks(bool async = false, bool show_hidden = false,
                    bool passive = false, uint32_t max_ms_per_chan = 300,
                    uint8_t channel = 0) {
-    (void)async;
     (void)show_hidden;
     (void)passive;
     (void)max_ms_per_chan;
     (void)channel;
-    return static_cast<int>(configuredNetworks().size());
+    // Async callers expect WIFI_SCAN_RUNNING; scanComplete provides the result.
+    return async ? -1 : static_cast<int>(configuredNetworks().size());
   }
   int scanComplete() { return static_cast<int>(configuredNetworks().size()); }
   String SSID() {
