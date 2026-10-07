@@ -1,5 +1,7 @@
 #include <Logging.h>
 
+#include <HalStorage.h>
+
 #include "network/FirmwareFlasher.h"
 #include "network/OtaBootSwitch.h"
 
@@ -18,6 +20,25 @@ Result validateImageFile(const char *, size_t) {
       "[SIM] Firmware image validation is disabled in the native simulator");
   return Result::WRITE_FAIL;
 }
+
+// CrossDink's split validate/flash API and header probes. Like the rest of
+// this file, nothing is ever written: every image reads as unusable.
+Result validateOpenImageFile(HalFile &, size_t) { return Result::WRITE_FAIL; }
+Result flashValidatedFile(HalFile &, ProgressCb onProgress, void *ctx) {
+  if (onProgress)
+    onProgress(1, 1, ctx);
+  return Result::WRITE_FAIL;
+}
+Result checkImageHeader(HalFile &, size_t) { return Result::WRITE_FAIL; }
+Result checkImageHeaderFile(const char *, size_t) {
+  return Result::WRITE_FAIL;
+}
+Result streamBegin(size_t) { return Result::WRITE_FAIL; }
+Result streamWrite(const uint8_t *, size_t) { return Result::WRITE_FAIL; }
+Result streamFinish() { return Result::WRITE_FAIL; }
+void streamAbort() {}
+bool streamActive() { return false; }
+uint16_t runningPartitionChipId() { return 0; }
 
 const char *resultName(Result r) {
   switch (r) {

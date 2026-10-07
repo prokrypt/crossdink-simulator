@@ -4,7 +4,7 @@
 #include <AppVersion.h>
 #endif
 
-#ifdef CROSSINK_VERSION
+#if defined(CROSSINK_VERSION) || defined(CROSSDINK_VERSION)
 #include <atomic>
 #endif
 
@@ -21,7 +21,7 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
   return NO_UPDATE;
 }
 
-#ifdef CROSSINK_VERSION
+#if defined(CROSSINK_VERSION) || defined(CROSSDINK_VERSION)
 OtaUpdater::OtaUpdaterError
 OtaUpdater::installUpdate(ProgressCallback onProgress, void *ctx,
                           std::atomic<bool> *cancelRequested) {

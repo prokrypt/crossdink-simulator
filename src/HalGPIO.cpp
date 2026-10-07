@@ -769,9 +769,23 @@ void HalGPIO::startDeepSleep() {
     SDL_Delay(10);
   }
 }
-bool HalGPIO::verifyPowerButtonWakeup(uint16_t /*requiredDurationMs*/,
-                                      bool /*shortPressAllowed*/) {
+bool HalGPIO::verifyPowerButtonWakeup(bool /*shortPressWakes*/,
+                                      uint16_t /*longHoldMs*/) {
   return true;
 }
+
+bool HalGPIO::hasLeftRightButtons() const {
+  return !(BoardConfig::isX4Pro() || BoardConfig::isSticky());
+}
+
+bool HalGPIO::startLatchedInput() { return false; }
+void HalGPIO::stopLatchedInput() {}
+HalGPIO::SampleResult HalGPIO::sampleInput() { return {false, false}; }
+
+bool HalGPIO::setTouchSleep(bool) { return false; }
+bool HalGPIO::isTouchAsleep() const { return false; }
+
+bool HalGPIO::isUsbConnectedCached() const { return isUsbConnected(); }
+bool HalGPIO::coldBootImpliesPowerButton() const { return false; }
 
 HalGPIO gpio;

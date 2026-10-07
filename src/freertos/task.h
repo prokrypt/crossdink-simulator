@@ -69,27 +69,92 @@ inline BaseType_t xTaskCreatePinnedToCore(void (*fn)(void *), const char *name,
   return xTaskCreate(fn, name, stackDepth, param, priority, handle);
 }
 
-// Block until notified (simulates ulTaskNotifyTake with clear-on-exit).
-inline uint32_t ulTaskNotifyTake(int /*clearOnExit*/,
-                                 uint32_t /*ticksToWait*/) {
+// Wait for a non-zero notification value, as FreeRTOS does: returns the value
+// before clearing (clearOnExit) or decrementing it, or 0 on timeout.
+inline uint32_t ulTaskNotifyTake(BaseType_t clearOnExit,
+                                 TickType_t ticksToWait) {
   auto *h = xTaskGetCurrentTaskHandle();
   std::unique_lock<std::mutex> lk(h->mtx);
-  h->cv.wait(lk, [h] { return h->notifyCount > 0; });
-  h->notifyCount--;
-  return 1;
+  const auto ready = [h] { return h->notifyValue != 0; };
+  if (!ready()) {
+    if (ticksToWait == 0)
+      return 0;
+    SimBlockedScope blocked(h);
+    if (ticksToWait == portMAX_DELAY) {
+      h->cv.wait(lk, ready);
+    } else if (!h->cv.wait_until(lk, simDeadline(ticksToWait), ready)) {
+      return 0;
+    }
+  }
+  const uint32_t value = h->notifyValue;
+  h->notifyValue = clearOnExit ? 0 : value - 1;
+  return value;
 }
 
-// Wake a task by incrementing its notification counter and signalling its
-// condvar.
-inline void xTaskNotify(TaskHandle_t handle, uint32_t /*value*/,
-                        int /*action*/) {
+// Update a task's notification value and wake it if it is waiting.
+inline BaseType_t xTaskNotify(TaskHandle_t handle, uint32_t value,
+                              int action) {
   if (!handle)
-    return;
+    return pdFAIL;
   {
     std::lock_guard<std::mutex> lk(handle->mtx);
-    handle->notifyCount++;
+    switch (action) {
+    case eSetBits:
+      handle->notifyValue |= value;
+      break;
+    case eIncrement:
+      handle->notifyValue++;
+      break;
+    case eSetValueWithOverwrite:
+      handle->notifyValue = value;
+      break;
+    case eSetValueWithoutOverwrite:
+      if (handle->notifyValue != 0)
+        return pdFAIL;
+      handle->notifyValue = value;
+      break;
+    default:
+      break;
+    }
   }
-  handle->cv.notify_one();
+  handle->cv.notify_all();
+  return pdPASS;
+}
+
+inline BaseType_t xTaskNotifyGive(TaskHandle_t handle) {
+  return xTaskNotify(handle, 0, eIncrement);
+}
+
+inline BaseType_t xTaskNotifyFromISR(TaskHandle_t handle, uint32_t value,
+                                     int action, BaseType_t *woken) {
+  if (woken)
+    *woken = pdFALSE;
+  return xTaskNotify(handle, value, action);
+}
+
+inline void vTaskNotifyGiveFromISR(TaskHandle_t handle, BaseType_t *woken) {
+  if (woken)
+    *woken = pdFALSE;
+  xTaskNotifyGive(handle);
+}
+
+// ESP-IDF's *WithCaps variants place the task stack in a chosen heap (PSRAM
+// on device). Host threads get their own stacks, so the caps are ignored.
+inline BaseType_t xTaskCreatePinnedToCoreWithCaps(
+    void (*fn)(void *), const char *name, uint32_t stackDepth, void *param,
+    UBaseType_t priority, TaskHandle_t *handle, BaseType_t coreId,
+    uint32_t /*memoryCaps*/) {
+  return xTaskCreatePinnedToCore(fn, name, stackDepth, param,
+                                 static_cast<BaseType_t>(priority), handle,
+                                 coreId);
+}
+inline BaseType_t xTaskCreateWithCaps(void (*fn)(void *), const char *name,
+                                      uint32_t stackDepth, void *param,
+                                      UBaseType_t priority,
+                                      TaskHandle_t *handle,
+                                      uint32_t /*memoryCaps*/) {
+  return xTaskCreate(fn, name, stackDepth, param,
+                     static_cast<BaseType_t>(priority), handle);
 }
 
 inline const char *pcTaskGetName(TaskHandle_t h) {
@@ -111,5 +176,49 @@ inline unsigned int uxTaskGetStackHighWaterMark(TaskHandle_t h) {
     return simStackCurrentMinimumFree();
   return simStackMinimumFree(h->stackUsage.get());
 }
+// Firmware parks a *WithCaps task (vTaskSuspend) and its owner deletes it
+// once the task has signalled completion, which can be just before it parks.
+// A host thread cannot be killed, so the parked thread stays blocked and its
+// handle is kept alive for it rather than freed under it.
+inline void vTaskDeleteWithCaps(TaskHandle_t h) {
+  if (h && h->thread.joinable())
+    h->thread.detach();
+}
+
 inline void vTaskList(char *) {}
-inline void vTaskDelay(int) {}
+inline void vTaskDelay(TickType_t ticks) {
+  if (ticks == 0) {
+    std::this_thread::yield();
+    return;
+  }
+  SimBlockedScope blocked(tl_currentTaskHandle);
+  std::this_thread::sleep_for(std::chrono::milliseconds(ticks));
+}
+
+inline TickType_t xTaskGetTickCount() {
+  using namespace std::chrono;
+  static const auto start = steady_clock::now();
+  return static_cast<TickType_t>(
+      duration_cast<milliseconds>(steady_clock::now() - start).count());
+}
+
+inline eTaskState eTaskGetState(TaskHandle_t h) {
+  if (!h)
+    return eInvalid;
+  return static_cast<eTaskState>(h->state.load());
+}
+
+// Suspending the calling task parks it for good: firmware workers do this
+// after their last touch of shared state, then wait to be deleted. Nothing in
+// the firmware resumes a suspended task, so other handles are left running.
+inline void vTaskSuspend(TaskHandle_t h) {
+  SimTaskHandle *self = xTaskGetCurrentTaskHandle();
+  if (h && h != self)
+    return;
+  self->state.store(eSuspended);
+  static std::mutex parkMtx;
+  static std::condition_variable parkCv;
+  std::unique_lock<std::mutex> lk(parkMtx);
+  parkCv.wait(lk, [] { return false; });
+}
+inline void vTaskResume(TaskHandle_t) {}

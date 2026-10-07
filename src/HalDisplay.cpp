@@ -362,6 +362,17 @@ void HalDisplay::begin() {
 
 void HalDisplay::begin(bool /*seamless*/) { begin(); }
 
+bool HalDisplay::seedDisplayedFrame(const uint8_t *) { return false; }
+
+bool HalDisplay::grayOnPanel() const { return false; }
+
+HalDisplay::GrayscaleCapabilities
+HalDisplay::grayscaleCapabilities(GrayscaleMode mode) const {
+  GrayscaleCapabilities caps;
+  caps.overlay = mode == GrayscaleMode::Overlay;
+  return caps;
+}
+
 void HalDisplay::clearScreen(uint8_t color) const {
   memset(getFrameBuffer(), color, BUFFER_SIZE);
 }
@@ -423,6 +434,14 @@ void HalDisplay::displayBufferAsync(RefreshMode mode) {
 }
 
 void HalDisplay::waitRefreshComplete() {}
+
+void HalDisplay::displayBufferDeferred(RefreshMode mode) {
+  refreshDisplay(mode, false);
+}
+
+bool HalDisplay::isRefreshPending() const { return false; }
+
+bool HalDisplay::isRefreshBusy() { return false; }
 
 bool HalDisplay::supportsAsyncRefresh() const { return false; }
 
@@ -513,6 +532,10 @@ bool HalDisplay::shouldQuit() const { return quitRequested.load(); }
 
 void HalDisplay::deepSleep() { presentIfNeeded(); }
 
+bool HalDisplay::powerOffIdle() { return false; }
+bool HalDisplay::powerOnIdle() { return false; }
+void HalDisplay::setRefreshLightSleep(bool) {}
+
 uint8_t *HalDisplay::getFrameBuffer() const {
   if (frameBufferLent) {
     return nullptr;
@@ -548,6 +571,19 @@ void HalDisplay::displayGrayscaleBase(RefreshMode fallback,
                                       bool turnOffScreen) {
   displayBuffer(fallback, turnOffScreen);
 }
+bool HalDisplay::displayGrayscaleBase(GrayscaleMode mode, RefreshMode fallback,
+                                      bool turnOffScreen) {
+  if (mode != GrayscaleMode::Overlay)
+    return false;
+  displayGrayscaleBase(fallback, turnOffScreen);
+  return true;
+}
+bool HalDisplay::displayGrayscaleBaseAsync(RefreshMode fallback) {
+  // Synchronous here: report that no base waveform is still running.
+  displayGrayscaleBase(fallback, false);
+  return false;
+}
+bool HalDisplay::supportsDeferredGrayscaleBase() const { return false; }
 void HalDisplay::preconditionGrayscale() {}
 void HalDisplay::preconditionGrayscale(uint16_t, uint16_t, uint16_t, uint16_t) {
 }
@@ -594,6 +630,26 @@ void HalDisplay::writeGrayscalePlaneStrip(bool lsbPlane, const uint8_t *rows,
   }
 }
 bool HalDisplay::supportsStripGrayscale() const { return true; }
+
+uint32_t HalDisplay::flashStartedMs() const { return 0; }
+uint32_t HalDisplay::flashMarkedMs() const { return 0; }
+uint32_t HalDisplay::flashEndsMs() const { return 0; }
+HalDisplay::FlashKind HalDisplay::flashKind() const { return FlashKind::Full; }
+uint32_t HalDisplay::flashPlannedMs() const { return 0; }
+HalDisplay::FlashKind HalDisplay::flashPlannedKind() const {
+  return FlashKind::Full;
+}
+HalDisplay::RefreshCounts &HalDisplay::refreshCounts() {
+  static RefreshCounts none{};
+  return none;
+}
+
+bool HalDisplay::grayShotReady() const { return false; }
+uint8_t HalDisplay::grayShotLevel(uint32_t, uint32_t) const { return 3; }
+bool HalDisplay::shouldSkipImageBlanking() const { return false; }
+void HalDisplay::setSmoothGray(bool) {}
+void HalDisplay::setInvertedTextGray(bool) {}
+bool HalDisplay::fastTracksPanel() const { return false; }
 
 uint16_t HalDisplay::getDisplayWidth() const { return DISPLAY_WIDTH; }
 uint16_t HalDisplay::getDisplayHeight() const { return DISPLAY_HEIGHT; }
