@@ -3,8 +3,10 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <unistd.h>
 
+#include <cctype>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -78,6 +80,42 @@ bool ensureParentDirectories(const std::string &full) {
   return ::mkdir(parent.c_str(), 0777) == 0 || errno == EEXIST;
 }
 
+bool isHiddenPath(const char *path) {
+  for (const char *p = path; *p; ++p) {
+    if (*p == '.' && (p == path || p[-1] == '/'))
+      return true;
+  }
+  return false;
+}
+
+bool extensionIs(const char *ext, const char *expected) {
+  for (; *ext && *expected; ++ext, ++expected) {
+    if (std::tolower(static_cast<unsigned char>(*ext)) != *expected)
+      return false;
+  }
+  return *ext == '\0' && *expected == '\0';
+}
+
+// Same rule as the firmware HalStorage: a mutation outside hidden paths of a
+// book-type file, or of an extensionless path (a folder), may change what the
+// Library lists. Over-reporting only costs one extra rescan.
+bool affectsLibrary(const char *path) {
+  if (!path || path[0] == '\0' || isHiddenPath(path))
+    return false;
+  const char *base = std::strrchr(path, '/');
+  base = base ? base + 1 : path;
+  const char *ext = std::strrchr(base, '.');
+  if (!ext)
+    return true;
+  return extensionIs(ext, ".epub") || extensionIs(ext, ".xtc") ||
+         extensionIs(ext, ".xtch") || extensionIs(ext, ".txt") ||
+         extensionIs(ext, ".md");
+}
+
+bool isFolderMutation(const char *path) {
+  return path && path[0] != '\0' && !isHiddenPath(path);
+}
+
 uint32_t packedFatTime(time_t timestamp) {
   struct tm local{};
   if (!localtime_r(&timestamp, &local) || local.tm_year < 80 ||
@@ -92,6 +130,8 @@ uint32_t packedFatTime(time_t timestamp) {
 } // namespace
 
 bool HalStorage::begin() {
+  // A simulator launch is always a cold mount.
+  markLibraryContentChanged("mount");
   const std::string root = configuredStorageRoot();
   for (size_t i = 1; i < root.size(); ++i) {
     if (root[i] == '/') {
@@ -102,6 +142,46 @@ bool HalStorage::begin() {
 }
 bool HalStorage::ready() const { return true; }
 void HalStorage::shutdown() {}
+
+uint64_t HalStorage::totalBytes() const {
+  struct statvfs vfs{};
+  const std::string root = configuredStorageRoot();
+  if (statvfs(root.c_str(), &vfs) != 0)
+    return 0;
+  return static_cast<uint64_t>(vfs.f_blocks) * vfs.f_frsize;
+}
+
+uint64_t HalStorage::usedBytes() {
+  struct statvfs vfs{};
+  const std::string root = configuredStorageRoot();
+  if (statvfs(root.c_str(), &vfs) != 0)
+    return 0;
+  return static_cast<uint64_t>(vfs.f_blocks - vfs.f_bfree) * vfs.f_frsize;
+}
+
+bool HalStorage::beginUsbDrive() { return false; }
+bool HalStorage::disconnectUsbDriveHost() { return false; }
+void HalStorage::endUsbDrive() {}
+UsbDriveState HalStorage::usbDriveState() const {
+  return UsbDriveState::Unsupported;
+}
+bool HalStorage::usbDriveHostSuspended() const { return false; }
+bool HalStorage::usbDriveIo(UsbDriveIo &) const { return false; }
+
+void HalStorage::noteLibraryScanned(const uint32_t generation) {
+  libraryScannedGeneration.store(generation, std::memory_order_release);
+  libraryScanned.store(true, std::memory_order_release);
+}
+
+bool HalStorage::libraryScanCurrent() const {
+  return libraryScanned.load(std::memory_order_acquire) &&
+         libraryScannedGeneration.load(std::memory_order_acquire) ==
+             libraryContentGeneration();
+}
+
+void HalStorage::markLibraryContentChanged(const char *) {
+  libraryGeneration.fetch_add(1, std::memory_order_acq_rel);
+}
 
 class HalFile::Impl {
 public:
@@ -292,6 +372,8 @@ bool HalFile::rename(const char *newPath) {
   }
   close();
   ensureParentDirectories(resolved);
+  if (affectsLibrary(newPath))
+    Storage.markLibraryContentChanged(newPath);
   return ::rename(impl->path.c_str(), resolved.c_str()) == 0;
 }
 bool HalFile::isDirectory() const { return impl && impl->isDir(); }
@@ -359,6 +441,10 @@ HalFile HalStorage::open(const char *path, const oflag_t oflag) {
   if ((oflag & O_CREAT) != 0) {
     ensureParentDirectories(full);
   }
+  if ((oflag & (O_WRONLY | O_RDWR | O_CREAT | O_TRUNC | O_APPEND)) != 0 &&
+      affectsLibrary(path)) {
+    markLibraryContentChanged(path);
+  }
   struct stat st;
   if (stat(full.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
     f.impl->openAsDir(full.c_str());
@@ -368,6 +454,8 @@ HalFile HalStorage::open(const char *path, const oflag_t oflag) {
   return f;
 }
 bool HalStorage::mkdir(const char *path, const bool /*pFlag*/) {
+  if (isFolderMutation(path) && !exists(path))
+    markLibraryContentChanged(path);
   std::string full = resolveStoragePath(path);
   if (full.empty()) {
     return false;
@@ -390,6 +478,8 @@ bool HalStorage::exists(const char *path) {
   return (stat(full.c_str(), &buffer) == 0);
 }
 bool HalStorage::remove(const char *path) {
+  if (affectsLibrary(path))
+    markLibraryContentChanged(path);
   std::string full = resolveStoragePath(path);
   if (full.empty()) {
     return false;
@@ -397,6 +487,8 @@ bool HalStorage::remove(const char *path) {
   return ::remove(full.c_str()) == 0;
 }
 bool HalStorage::rename(const char *oldPath, const char *newPath) {
+  if (affectsLibrary(oldPath) || affectsLibrary(newPath))
+    markLibraryContentChanged(newPath);
   std::string o = resolveStoragePath(oldPath);
   std::string n = resolveStoragePath(newPath);
   if (o.empty() || n.empty()) {
@@ -426,6 +518,8 @@ static bool removeDirRecursive(const std::string &full) {
 }
 
 bool HalStorage::rmdir(const char *path) {
+  if (isFolderMutation(path))
+    markLibraryContentChanged(path);
   std::string full = resolveStoragePath(path);
   if (full.empty()) {
     return false;
@@ -433,6 +527,8 @@ bool HalStorage::rmdir(const char *path) {
   return removeDirRecursive(full);
 }
 bool HalStorage::removeDir(const char *path) {
+  if (isFolderMutation(path))
+    markLibraryContentChanged(path);
   std::string full = resolveStoragePath(path);
   if (full.empty()) {
     return false;
@@ -484,9 +580,8 @@ bool HalStorage::writeFile(const char *path, const String &content) {
 }
 bool HalStorage::ensureDirectoryExists(const char *path) { return mkdir(path); }
 
-void HalStorage::installDateTimeCallback(
-    const uint8_t *utcOffsetQuarterHoursBiased) {
-  (void)utcOffsetQuarterHoursBiased;
+void HalStorage::installDateTimeCallback(UtcOffsetFn utcOffsetQuarterHoursAt) {
+  (void)utcOffsetQuarterHoursAt;
 }
 
 bool HalStorage::openFileForRead(const char *moduleName, const char *path,
@@ -500,6 +595,15 @@ bool HalStorage::openFileForRead(const char *moduleName,
 }
 bool HalStorage::openFileForRead(const char *moduleName, const String &path,
                                  HalFile &file) {
+  return openFileForRead(moduleName, path.c_str(), file);
+}
+bool HalStorage::openFileForReadIfPresent(const char *moduleName,
+                                          const char *path, HalFile &file) {
+  return openFileForRead(moduleName, path, file);
+}
+bool HalStorage::openFileForReadIfPresent(const char *moduleName,
+                                          const std::string &path,
+                                          HalFile &file) {
   return openFileForRead(moduleName, path.c_str(), file);
 }
 bool HalStorage::openFileForWrite(const char *moduleName, const char *path,

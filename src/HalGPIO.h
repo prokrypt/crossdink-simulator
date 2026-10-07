@@ -78,6 +78,8 @@ public:
   inline bool deviceIsX4() const { return _deviceType == DeviceType::X4; }
   bool isXteinkDevice() const;
   bool hasEdgeSideButtons() const;
+  // False on boards whose only physical nav keys are Up/Down (X4 Pro, Sticky).
+  bool hasLeftRightButtons() const;
 
   // Start button GPIO and setup SPI for screen and SD card
   void begin();
@@ -88,6 +90,17 @@ public:
 
   // Button input methods
   void update();
+
+  // The firmware hands sampling to an input task on device. HalGPIO::update()
+  // owns the SDL event pump here, which must stay on the main thread, so
+  // latched input never starts and update() keeps sampling directly.
+  bool startLatchedInput();
+  void stopLatchedInput();
+  struct SampleResult {
+    bool events;
+    bool active;
+  };
+  SampleResult sampleInput();
   bool isPressed(uint8_t buttonIndex) const;
   bool wasPressed(uint8_t buttonIndex) const;
   bool wasAnyPressed() const;
@@ -117,6 +130,9 @@ public:
   bool wasSwipe(float &nxStart, float &nyStart, float &nxEnd,
                 float &nyEnd) const;
   bool wasTouchActivity() const;
+  // No touch controller to power down on the host.
+  bool setTouchSleep(bool asleep);
+  bool isTouchAsleep() const;
   void setSharedConfirmPowerShortPressEmitsPower(bool enabled);
   bool consumeSimulatorSleepRequest();
 
@@ -124,11 +140,14 @@ public:
   void startDeepSleep();
 
   // Simulated power-button wakes are always accepted so host boot can continue.
-  bool verifyPowerButtonWakeup(uint16_t requiredDurationMs,
-                               bool shortPressAllowed);
+  bool verifyPowerButtonWakeup(bool shortPressWakes, uint16_t longHoldMs);
 
   // Check if USB is connected
   bool isUsbConnected() const;
+  bool isUsbConnectedCached() const;
+  // Host launches are cold boots with "USB" attached; never treat them as a
+  // power-button boot that should go straight back to sleep.
+  bool coldBootImpliesPowerButton() const;
 
   // Returns true once per edge (plug or unplug) since the last update()
   bool wasUsbStateChanged() const;

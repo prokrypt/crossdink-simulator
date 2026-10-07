@@ -234,6 +234,8 @@ public:
     return true;
   }
   IPAddress softAPIP() { return IPAddress(127, 0, 0, 1); }
+  String softAPSSID() { return currentSsid; }
+  String softAPmacAddress() { return String("02:00:00:00:00:02"); }
 
   String macAddress() { return String("02:00:00:00:00:01"); }
   uint8_t *macAddress(uint8_t *mac) {

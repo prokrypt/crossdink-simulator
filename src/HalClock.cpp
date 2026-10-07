@@ -16,7 +16,7 @@ constexpr char kFullMonthNames[][10] = {
 
 void HalClock::begin() {
 #if defined(SIMULATOR_DEVICE_X3) || defined(SIMULATOR_DEVICE_X4_PRO) || \
-    defined(SIMULATOR_DEVICE_STICKY)
+    defined(SIMULATOR_DEVICE_X4_CLASSIC) || defined(SIMULATOR_DEVICE_STICKY)
   _available = true;
 #else
   _available = false;
@@ -56,6 +56,28 @@ bool HalClock::getDateTime(uint16_t &year, uint8_t &month, uint8_t &day,
   day = static_cast<uint8_t>(utcTime.tm_mday);
   hour = static_cast<uint8_t>(utcTime.tm_hour);
   minute = static_cast<uint8_t>(utcTime.tm_min);
+  return true;
+}
+
+bool HalClock::getDateTime(uint16_t &year, uint8_t &month, uint8_t &day,
+                           uint8_t &hour, uint8_t &minute,
+                           uint8_t &second) const {
+  if (!_available)
+    return false;
+
+  const std::time_t now = std::time(nullptr);
+  std::tm utcTime{};
+#if defined(_WIN32)
+  gmtime_s(&utcTime, &now);
+#else
+  gmtime_r(&now, &utcTime);
+#endif
+  year = static_cast<uint16_t>(utcTime.tm_year + 1900);
+  month = static_cast<uint8_t>(utcTime.tm_mon + 1);
+  day = static_cast<uint8_t>(utcTime.tm_mday);
+  hour = static_cast<uint8_t>(utcTime.tm_hour);
+  minute = static_cast<uint8_t>(utcTime.tm_min);
+  second = static_cast<uint8_t>(utcTime.tm_sec);
   return true;
 }
 

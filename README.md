@@ -2,6 +2,14 @@
 
 A desktop simulator for [CrossInk](https://github.com/uxjulia/CrossInk). Compiles the firmware natively and renders the e-ink display in an SDL2 window. No device required.
 
+> [!IMPORTANT]
+> **This is the CrossDink fork.** It tracks the HAL of
+> [CrossDink](https://github.com/prokrypt/crossdink), which has grown past
+> CrossInk's (smooth gray and flash timing on `HalDisplay`, background-work and
+> refresh holds on `HalPowerManager`, Library change tracking and USB Drive on
+> `HalStorage`, latched input and touch sleep on `HalGPIO`, and more). CrossDink
+> pins this repository by commit; bump that pin after changing anything here.
+
 > [!NOTE]
 > **Platform support:** macOS and Linux/WSL use different native compiler and library flags. Start from `sample-platformio-macos.ini` on macOS, or `sample-platformio-linux-wsl.ini` on Linux/WSL. Native Windows is not supported; use WSL and follow the Linux instructions.
 

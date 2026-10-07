@@ -2,6 +2,7 @@
 #include <functional>
 #include <memory>
 
+#include "Arduino.h"
 #include "NetworkClient.h"
 #include "WString.h"
 
@@ -113,6 +114,16 @@ public:
   NetworkClient client();
   long clientContentLength();
   HTTPUpload &upload();
+
+protected:
+  // Arduino's WebServer exposes its listening socket and current connection
+  // to subclasses. The host server accepts and finishes each request inside
+  // handleClient(), so nothing is ever left pending between calls.
+  struct PendingServer {
+    bool hasClient() const { return false; }
+  };
+  PendingServer _server;
+  NetworkClient _currentClient;
 
 private:
   struct Impl;

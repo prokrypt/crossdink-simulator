@@ -1,4 +1,5 @@
 #pragma once
+#include <cctype>
 
 // ArduinoJson auto-detects Arduino's String class via the ARDUINO macro, which
 // is not defined in the simulator's native build. Enable the support manually
@@ -80,6 +81,14 @@ public:
   }
   bool equals(const String &other) const { return s == other.s; }
   bool equals(const char *other) const { return s == (other ? other : ""); }
+  void toLowerCase() {
+    for (char &c : s)
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  }
+  void toUpperCase() {
+    for (char &c : s)
+      c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+  }
   void trim() {
     size_t first = s.find_first_not_of(" \t\n\r");
     if (first == std::string::npos) {

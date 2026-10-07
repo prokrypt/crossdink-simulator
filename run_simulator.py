@@ -28,6 +28,17 @@ Import("env")
 import os
 import builtins
 import re
+import sys
+
+# --- host crypto library ---
+# MD5Builder_linux.h uses OpenSSL's libcrypto; macOS uses CommonCrypto from
+# the system libraries. Link libcrypto into the program on Linux so consuming
+# firmware environments need no host-specific -l flags. The program is linked
+# from the default (project) environment, not this library's clone of it.
+if sys.platform.startswith("linux"):
+    _program_env = DefaultEnvironment()
+    if "crypto" not in [str(lib) for lib in _program_env.get("LIBS", [])]:
+        _program_env.Append(LIBS=["crypto"])
 
 RUN_SIMULATOR_TARGET_KEY = "_crosspoint_run_simulator_target_registered"
 RUN_SIMULATOR_TARGET_OWNER_OPTION = "custom_run_simulator_target_owner"

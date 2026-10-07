@@ -30,13 +30,27 @@ bool HalFrontlight::hasColorTemperature() const {
 
 void HalFrontlight::setBrightness(uint8_t percent) {
   lastBrightness = std::min<uint8_t>(percent, 100);
+  idleDim = 100;
+  overlay = NO_OVERLAY;
 }
 
 void HalFrontlight::setWarmth(uint8_t warmPercent) {
   lastWarmth = std::min<uint8_t>(warmPercent, 100);
 }
 
-void HalFrontlight::setOn(bool on) { lit = present() && on; }
+void HalFrontlight::setOn(bool on) {
+  lit = present() && on;
+  idleDim = 100;
+  overlay = NO_OVERLAY;
+}
+
+void HalFrontlight::setIdleDim(uint8_t percent) {
+  idleDim = std::min<uint8_t>(percent, 100);
+}
+
+void HalFrontlight::setOverlay(uint8_t percent) {
+  overlay = percent == NO_OVERLAY ? NO_OVERLAY : std::min<uint8_t>(percent, 100);
+}
 
 uint8_t HalFrontlight::brightness() const { return lastBrightness; }
 
