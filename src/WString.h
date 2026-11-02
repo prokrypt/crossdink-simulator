@@ -118,6 +118,16 @@ public:
   void replace(const String &find, const String &replaceWith) {
     replace(find.s.c_str(), replaceWith.s.c_str());
   }
+  void remove(size_t offset) {
+    if (offset < s.size())
+      s.erase(offset);
+  }
+  bool reserve(size_t bytes) {
+    s.reserve(bytes);
+    return true;
+  }
+  const char *begin() const { return s.data(); }
+  const char *end() const { return s.data() + s.size(); }
   bool isEmpty() const { return s.empty(); }
   size_t length() const { return s.length(); }
   const char *c_str() const { return s.c_str(); }

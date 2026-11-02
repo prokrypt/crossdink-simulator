@@ -1,6 +1,8 @@
 #include "HalGPIO.h"
 
 #include <BoardConfig.h>
+// Keep the font dependency visible to PlatformIO across the renderer/HAL cycle.
+#include <EpdFontFamily.h>
 #include <GfxRenderer.h>
 #include <SDL.h>
 

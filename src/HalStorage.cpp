@@ -6,6 +6,7 @@
 #include <sys/statvfs.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cctype>
 #include <cerrno>
 #include <cstdio>
@@ -127,6 +128,15 @@ uint32_t packedFatTime(time_t timestamp) {
       (local.tm_hour << 11) | (local.tm_min << 5) | (local.tm_sec / 2));
   return (date << 16) | time;
 }
+
+bool storageStats(struct statvfs &stats) {
+  const std::string root = configuredStorageRoot();
+  if (statvfs(root.c_str(), &stats) == 0)
+    return true;
+  fprintf(stderr, "[SIM] storage capacity failed: %s (%s)\n", root.c_str(),
+          strerror(errno));
+  return false;
+}
 } // namespace
 
 bool HalStorage::begin() {
@@ -142,21 +152,18 @@ bool HalStorage::begin() {
 }
 bool HalStorage::ready() const { return true; }
 void HalStorage::shutdown() {}
-
 uint64_t HalStorage::totalBytes() const {
-  struct statvfs vfs{};
-  const std::string root = configuredStorageRoot();
-  if (statvfs(root.c_str(), &vfs) != 0)
-    return 0;
-  return static_cast<uint64_t>(vfs.f_blocks) * vfs.f_frsize;
+  struct statvfs stats{};
+  return storageStats(stats) ? uint64_t(stats.f_blocks) * stats.f_frsize : 0;
 }
-
 uint64_t HalStorage::usedBytes() {
-  struct statvfs vfs{};
-  const std::string root = configuredStorageRoot();
-  if (statvfs(root.c_str(), &vfs) != 0)
-    return 0;
-  return static_cast<uint64_t>(vfs.f_blocks - vfs.f_bfree) * vfs.f_frsize;
+  struct statvfs stats{};
+  // Count reserved blocks as used so download checks reflect writable space.
+  return storageStats(stats)
+             ? uint64_t(stats.f_blocks -
+                        std::min(stats.f_blocks, stats.f_bavail)) *
+                   stats.f_frsize
+             : UINT64_MAX; // Fail closed if the preceding total query succeeded.
 }
 
 bool HalStorage::beginUsbDrive() { return false; }
@@ -189,6 +196,7 @@ public:
   std::string path;
   DIR *dir = nullptr;
   size_t directoryPosition = 0;
+  bool iterationFailed = false;
 
   bool open(const char *p, int flags) {
     path = p;
@@ -378,6 +386,8 @@ bool HalFile::rename(const char *newPath) {
 }
 bool HalFile::isDirectory() const { return impl && impl->isDir(); }
 void HalFile::rewindDirectory() {
+  if (impl)
+    impl->iterationFailed = false;
   if (impl && impl->dir) {
     rewinddir(impl->dir);
     impl->directoryPosition = 0;
@@ -386,6 +396,7 @@ void HalFile::rewindDirectory() {
 bool HalFile::close() {
   if (!impl)
     return true;
+  impl->iterationFailed = false;
   if (impl->dir) {
     closedir(impl->dir);
     impl->dir = nullptr;
@@ -397,15 +408,24 @@ bool HalFile::close() {
   return true;
 }
 HalFile HalFile::openNextFile() {
+  if (impl)
+    impl->iterationFailed = false;
   if (!impl || !impl->dir)
     return HalFile();
   while (true) {
+    errno = 0;
     struct dirent *entry = readdir(impl->dir);
-    if (!entry)
+    if (!entry) {
+      if (errno != 0) {
+        impl->iterationFailed = true;
+        fprintf(stderr, "[SIM] directory iteration failed: %s (%s)\n",
+                impl->path.c_str(), strerror(errno));
+      }
       return HalFile();
+    }
     ++impl->directoryPosition;
-    if (entry->d_name[0] == '.')
-      continue; // skip . and ..
+    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+      continue; // raw iteration includes hidden files, just like SdFat
 
     std::string childFsPath = impl->path;
     if (childFsPath.back() != '/')
@@ -414,17 +434,27 @@ HalFile HalFile::openNextFile() {
 
     HalFile child;
     struct stat st;
-    if (stat(childFsPath.c_str(), &st) != 0)
-      continue;
+    if (stat(childFsPath.c_str(), &st) != 0) {
+      impl->iterationFailed = true;
+      fprintf(stderr, "[SIM] directory entry failed: %s (%s)\n",
+              childFsPath.c_str(), strerror(errno));
+      return HalFile();
+    }
 
     if (S_ISDIR(st.st_mode)) {
       child.impl->openAsDir(childFsPath.c_str());
     } else {
       child.impl->open(childFsPath.c_str(), O_RDONLY);
     }
+    if (!child) {
+      impl->iterationFailed = true;
+      fprintf(stderr, "[SIM] directory entry open failed: %s (%s)\n",
+              childFsPath.c_str(), strerror(errno));
+    }
     return child;
   }
 }
+bool HalFile::iterationFailed() const { return impl && impl->iterationFailed; }
 bool HalFile::isOpen() const {
   if (!impl)
     return false;
@@ -500,21 +530,29 @@ bool HalStorage::rename(const char *oldPath, const char *newPath) {
 static bool removeDirRecursive(const std::string &full) {
   DIR *d = opendir(full.c_str());
   if (!d)
-    return ::remove(full.c_str()) == 0; // might be a plain file
+    return ::remove(full.c_str()) == 0;
+  bool ok = true;
   struct dirent *entry;
   while ((entry = readdir(d)) != nullptr) {
-    if (entry->d_name[0] == '.')
+    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
       continue;
-    std::string child = full + "/" + entry->d_name;
+    const std::string child = full + "/" + entry->d_name;
     struct stat st;
-    if (stat(child.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
-      removeDirRecursive(child);
-    } else {
-      ::remove(child.c_str());
+    // Do not follow a host symlink out of the simulated SD root.
+    if (lstat(child.c_str(), &st) != 0) {
+      ok = false;
+      break;
+    }
+    const bool removed = S_ISDIR(st.st_mode) ? removeDirRecursive(child)
+                                             : ::remove(child.c_str()) == 0;
+    if (!removed) {
+      ok = false;
+      break;
     }
   }
-  closedir(d);
-  return ::rmdir(full.c_str()) == 0;
+  if (closedir(d) != 0)
+    ok = false;
+  return ok && ::rmdir(full.c_str()) == 0;
 }
 
 bool HalStorage::rmdir(const char *path) {
@@ -631,10 +669,32 @@ std::vector<String> HalStorage::listFiles(const char *path, int maxFiles) {
     return result;
   struct dirent *entry;
   while ((entry = readdir(dir)) != nullptr && (int)result.size() < maxFiles) {
-    if (entry->d_name[0] == '.')
-      continue; // skip . and ..
+    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+      continue; // raw iteration includes hidden files, just like SdFat
     result.push_back(String(entry->d_name));
   }
   closedir(dir);
   return result;
+}
+
+bool HalStorage::readFileToString(const char *module, const std::string &path,
+                                  size_t cap, std::string &out) {
+  out.clear();
+  HalFile file;
+  if (!openFileForRead(module, path, file))
+    return false;
+  const auto size = file.size();
+  if (size > cap || file.isDirectory()) {
+    file.close();
+    return false;
+  }
+  out.resize(size);
+  const bool readOk =
+      size == 0 || file.read(out.data(), size) == static_cast<int>(size);
+  const bool closeOk = file.close();
+  if (!readOk || !closeOk) {
+    out.clear();
+    return false;
+  }
+  return true;
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <climits>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -153,35 +154,78 @@ inline bool fetchFromFileUrl(const std::string &url, Response &out) {
   return true;
 }
 
+// Resolve full URL paths first. A structured snapshot mock is authoritative:
+// a missing indexed LICENSE must not become a different tree's same basename.
+inline bool mockRelativePath(const std::string &url, std::string &relative) {
+  const size_t scheme = url.find("://");
+  const size_t begin =
+      scheme == std::string::npos ? 0 : url.find('/', scheme + 3);
+  if (begin == std::string::npos)
+    return false;
+  const size_t end = url.find_first_of("?#", begin);
+  relative = urlDecode(url.substr(begin, end - begin));
+  if (!relative.empty() && relative.front() == '/')
+    relative.erase(0, 1);
+  if (relative.empty() || relative.find('\\') != std::string::npos ||
+      relative.find('\0') != std::string::npos)
+    return false;
+  size_t offset = 0;
+  while (offset <= relative.size()) {
+    const size_t slash = relative.find('/', offset);
+    const std::string segment = relative.substr(offset, slash - offset);
+    if (segment.empty() || segment == "." || segment == "..")
+      return false;
+    if (slash == std::string::npos)
+      break;
+    offset = slash + 1;
+  }
+  return true;
+}
+
+inline bool readMockFile(const std::string &root, const std::string &path,
+                         std::string &body) {
+  char actualRoot[PATH_MAX], actualPath[PATH_MAX];
+  if (!realpath(root.c_str(), actualRoot) ||
+      !realpath(path.c_str(), actualPath))
+    return false;
+  const std::string prefix = std::string(actualRoot) + '/';
+  struct stat st{};
+  return std::string(actualPath).rfind(prefix, 0) == 0 &&
+         stat(actualPath, &st) == 0 && S_ISREG(st.st_mode) &&
+         readFile(actualPath, body);
+}
+
 inline bool fetchFromMockRoot(const std::string &url, Response &out) {
   const char *root = std::getenv("CROSSINK_SIM_HTTP_MOCK_ROOT");
   if (!root || root[0] == '\0')
     return false;
-
-  std::string name = basenameFromUrl(url);
-  if (name.empty() || name == "." || name == ".." ||
-      name.find('/') != std::string::npos ||
-      name.find('\\') != std::string::npos) {
-    return false;
+  std::string relative;
+  if (!mockRelativePath(url, relative)) {
+    out.body.clear();
+    out.statusCode = 404;
+    return true;
   }
-
-  std::string path = root;
-  if (!path.empty() && path.back() != '/')
-    path += '/';
-  path += name;
-
-  if (!readFile(path, out.body)) {
-    std::string nestedPath;
-    if (!findFileByBasename(root, name, nestedPath) ||
-        !readFile(nestedPath, out.body))
-      return false;
-  }
-
-  if (!out.body.empty()) {
+  const std::string directory(root);
+  if (readMockFile(directory, directory + '/' + relative, out.body)) {
     out.statusCode = 200;
     return true;
   }
-  return false;
+  // Keep legacy font/book fixture lookup, but never alias snapshot paths.
+  if (relative.rfind("snapshots/", 0) != 0 ||
+      !isDirectory(directory + "/snapshots")) {
+    const std::string name = basenameFromUrl(url);
+    std::string nestedPath;
+    if (readMockFile(directory, directory + '/' + name, out.body) ||
+        (findFileByBasename(directory, name, nestedPath) &&
+         readMockFile(directory, nestedPath, out.body))) {
+      out.statusCode = 200;
+      return true;
+    }
+    return false;
+  }
+  out.body.clear();
+  out.statusCode = 404;
+  return true;
 }
 
 inline bool fetchWithCurl(const std::string &url, const char *method,

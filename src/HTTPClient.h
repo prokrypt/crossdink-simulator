@@ -11,17 +11,17 @@
 
 class NetworkClient;
 
-#define HTTPC_ERROR_CONNECTION_REFUSED  (-1)
-#define HTTPC_ERROR_SEND_HEADER_FAILED  (-2)
+#define HTTPC_ERROR_CONNECTION_REFUSED (-1)
+#define HTTPC_ERROR_SEND_HEADER_FAILED (-2)
 #define HTTPC_ERROR_SEND_PAYLOAD_FAILED (-3)
-#define HTTPC_ERROR_NOT_CONNECTED       (-4)
-#define HTTPC_ERROR_CONNECTION_LOST     (-5)
-#define HTTPC_ERROR_NO_STREAM           (-6)
-#define HTTPC_ERROR_NO_HTTP_SERVER      (-7)
-#define HTTPC_ERROR_TOO_LESS_RAM        (-8)
-#define HTTPC_ERROR_ENCODING            (-9)
-#define HTTPC_ERROR_STREAM_WRITE        (-10)
-#define HTTPC_ERROR_READ_TIMEOUT        (-11)
+#define HTTPC_ERROR_NOT_CONNECTED (-4)
+#define HTTPC_ERROR_CONNECTION_LOST (-5)
+#define HTTPC_ERROR_NO_STREAM (-6)
+#define HTTPC_ERROR_NO_HTTP_SERVER (-7)
+#define HTTPC_ERROR_TOO_LESS_RAM (-8)
+#define HTTPC_ERROR_ENCODING (-9)
+#define HTTPC_ERROR_STREAM_WRITE (-10)
+#define HTTPC_ERROR_READ_TIMEOUT (-11)
 
 enum { HTTPC_STRICT_FOLLOW_REDIRECTS, HTTP_CODE_OK = 200 };
 
@@ -47,7 +47,7 @@ public:
   HTTPClient() {}
   ~HTTPClient() {}
 
-  void begin(NetworkClient &client, const char *url) {
+  template <typename Transport> void begin(Transport &client, const char *url) {
     (void)client;
     url_ = url ? url : "";
     responseBody_.s.clear();
@@ -175,7 +175,8 @@ private:
       return 0;
 
     sim_http_fetch::Response response;
-    if (!sim_http_fetch::fetch(url_, method, headers_, basicAuth_, body, response)) {
+    if (!sim_http_fetch::fetch(url_, method, headers_, basicAuth_, body,
+                               response)) {
       responseBody_ = "";
       responseStream_.reset();
       statusCode_ = 0;
