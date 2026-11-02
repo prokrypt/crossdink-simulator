@@ -44,6 +44,14 @@ RUN_SIMULATOR_TARGET_KEY = "_crosspoint_run_simulator_target_registered"
 RUN_SIMULATOR_TARGET_OWNER_OPTION = "custom_run_simulator_target_owner"
 SIMULATOR_HTTP_PORT_OPTION = "custom_simulator_http_port"
 
+# Some firmware versions provide the serial wrapper themselves. Keep our
+# fallback from defining the same singleton, virtual methods, and vtable.
+logging_path = os.path.join(env.subst("$PROJECT_DIR"), "lib", "Logging", "Logging.cpp")
+if os.path.isfile(logging_path):
+    with open(logging_path, encoding="utf-8") as logging_file:
+        if re.search(r"^\s*MySerialImpl\s+MySerialImpl::instance\s*;", logging_file.read(), re.MULTILINE):
+            env.AppendUnique(CPPDEFINES=["CROSSPOINT_SIMULATOR_PROJECT_SERIAL_IMPL"])
+
 
 # --- run_simulator custom target ---
 

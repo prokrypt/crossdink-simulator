@@ -12,9 +12,9 @@
 //
 // Logging.h declares `static MySerialImpl instance;` plus several virtual
 // overrides, and `#define Serial MySerialImpl::instance` redirects every
-// `Serial.*` call site through it. The matching definitions used to live in
-// lib/Logging/Logging.cpp behind `#ifdef SIMULATOR`, but were dropped during
-// an upstream merge. Restore them here so the simulator links.
+// `Serial.*` call site through it. Use these fallbacks only when the firmware's
+// Logging.cpp does not provide the wrapper (detected by run_simulator.py).
+#ifndef CROSSPOINT_SIMULATOR_PROJECT_SERIAL_IMPL
 MySerialImpl MySerialImpl::instance;
 
 size_t MySerialImpl::write(uint8_t b) { return logSerial.write(b); }
@@ -22,7 +22,9 @@ size_t MySerialImpl::write(const uint8_t *buffer, size_t size) {
   return logSerial.write(buffer, size);
 }
 void MySerialImpl::flush() { logSerial.flush(); }
+#endif
 
+// printf is missing from both firmware variants, so keep this fallback shared.
 size_t MySerialImpl::printf(const char *format, ...) {
   va_list args;
   va_start(args, format);

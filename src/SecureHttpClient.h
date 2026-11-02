@@ -1,4 +1,9 @@
 #pragma once
+#if defined(CROSSPOINT_SIM_USE_SDK_HTTP)
+#include "HTTPClient.h"
+#include_next <SecureHttpClient.h>
+#else
+#pragma once
 
 #include <string>
 
@@ -64,3 +69,5 @@ private:
 };
 
 } // namespace freeink
+
+#endif

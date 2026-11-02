@@ -11,7 +11,9 @@
 
 // On ESP32, WiFiClient is a TCP client backed by the WiFi stack.
 // In the simulator NetworkClient already provides the same interface.
+#ifndef CROSSPOINT_SIM_USE_SDK_HTTP
 using WiFiClient = NetworkClient;
+#endif
 
 enum wl_status_t {
   WL_IDLE_STATUS = 0,

@@ -227,8 +227,11 @@ host's `curl` binary through simulator implementations of `HTTPClient` and
 desktop build to reach real HTTP/HTTPS services.
 
 **Mocked downloads**: Set `CROSSINK_SIM_HTTP_MOCK_ROOT` to a folder of local
-fixtures to make host-backed HTTP requests return local files by basename before
-falling back to the real network. This is useful for SD-font testing because the
+fixtures to make host-backed HTTP requests resolve the full decoded URL path
+inside that directory first. Traversal and symlink escapes are rejected. When
+the mock contains a `snapshots/` tree, snapshot paths are authoritative: missing
+files return 404, never another directory’s same-basename license. Other paths
+retain legacy basename lookup before falling back to the real network. This is useful for SD-font testing because the
 firmware can request its normal release URLs while the simulator serves a local
 `fonts.json` and `.cpfont` files:
 
@@ -394,3 +397,33 @@ Regression probes (no SDL needed):
 ```sh
 python3 tests/run_stack_check.py
 ```
+
+## SDK HTTP transport
+
+Consumers can enable `CROSSPOINT_SIM_USE_SDK_HTTP=1` and
+`FREEINK_NET_EXTERNAL_TLS=1` and `ARDUINOJSON_ENABLE_ARDUINO_STRING=1`, link SDK SecureNet, and add the compile/link flags
+from `pkg-config --cflags --libs openssl`. This requires OpenSSL development
+headers and pkg-config (Homebrew/MacPorts on macOS, the distribution packages on
+Linux). The SDK must support the external TLS implementation switch.
+
+This mode uses native sockets and OpenSSL while running the SDK's real HTTP and
+resumable-download code. It supports HTTP and HTTPS, custom roots and cancellation;
+firmware requests using `setInsecure()` retain that policy. Native TLS is not
+evidence of wolfSSL heap use or ESP32 certificate behavior. Raw directory iteration
+includes dot-prefixed files to match SdFat; callers decide which files to display.
+
+## Digest, storage, and HTTP mock checks
+
+Run `python3 tests/run_asset_primitives_check.py` to check the simulator's
+SHA-256, directory iterator, storage capacity, and HTTP mock implementations
+without SDL. Digest checks compare standard, long, and binary inputs at several
+streaming chunk sizes against Python's `hashlib` and exercise context restart.
+Directory checks distinguish normal exhaustion from read and entry-open errors,
+verify error reset on rewind, and cover dot-prefixed files.
+
+HTTP mock checks cover distinct same-basename licenses, missing companions,
+empty files, encoded traversal, symlink escapes, and legacy font/book lookup.
+Storage capacity reports the real host filesystem's process-available space;
+it does not model SD size or hardware resource limits. Capacity/error checks
+compare the host API directly. All checks build with AddressSanitizer and
+UndefinedBehaviorSanitizer.

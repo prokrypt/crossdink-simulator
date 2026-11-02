@@ -53,7 +53,7 @@ public:
   // No-op: the simulator's storage backend is POSIX fds with nothing to
   // power down before a simulated deep sleep.
   void shutdown();
-  // Capacity of the filesystem holding the simulated SD root.
+  // Host filesystem capacity, not a modeled SD-card/device resource limit.
   uint64_t totalBytes() const;
   uint64_t usedBytes();
   std::vector<String> listFiles(const char *path = "/", int maxFiles = 200);
@@ -70,6 +70,8 @@ public:
                           size_t maxBytes = 0);
   // Write a string to `path` on the SD card. Overwrites existing file.
   // Returns true on success.
+  bool readFileToString(const char *module, const std::string &path, size_t cap,
+                        std::string &out);
   bool writeFile(const char *path, const String &content);
   // Ensure a directory exists, creating it if necessary. Returns true on
   // success.
@@ -178,8 +180,7 @@ public:
   HalFile openNextFile();
   // The host filesystem does not model the device wrapper-allocation failure.
   bool allocationFailed() const { return false; }
-  // readdir() failures are not distinguished from end-of-directory here.
-  bool iterationFailed() const { return false; }
+  bool iterationFailed() const;
   bool isOpen() const;
   operator bool() const;
 };
