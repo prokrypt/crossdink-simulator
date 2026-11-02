@@ -1,6 +1,9 @@
 #if defined(CROSSPOINT_SIM_USE_SDK_HTTP) && defined(FREEINK_NET_EXTERNAL_TLS)
 #include <SecureClient.h>
+#include <netdb.h>
+#include <sys/socket.h>
 #include <algorithm>
+#include <cstdio>
 #include <climits>
 #include <csignal>
 #include <openssl/err.h>
@@ -184,6 +187,20 @@ void SecureClient::stop() {
   _ssl = _ctx = nullptr;
   _connected = false;
   _transport.stop();
+}
+// The SDK's plain-HTTP path checks DNS before connecting; the SDK definition
+// lives in its ESP-only SecureClient.cpp, so the host build provides it here.
+bool hostResolves(const char *host) {
+  addrinfo hints{};
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+  addrinfo *result = nullptr;
+  const int status = getaddrinfo(host, nullptr, &hints, &result);
+  if (result)
+    freeaddrinfo(result);
+  if (status != 0)
+    fprintf(stderr, "[SIM] DNS lookup failed: %s (%s)\n", host, gai_strerror(status));
+  return status == 0;
 }
 } // namespace freeink
 #endif
