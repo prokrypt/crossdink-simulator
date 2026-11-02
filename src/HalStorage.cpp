@@ -166,22 +166,6 @@ uint64_t HalStorage::usedBytes() {
              : UINT64_MAX; // Fail closed if the preceding total query succeeded.
 }
 
-uint64_t HalStorage::totalBytes() const {
-  struct statvfs vfs{};
-  const std::string root = configuredStorageRoot();
-  if (statvfs(root.c_str(), &vfs) != 0)
-    return 0;
-  return static_cast<uint64_t>(vfs.f_blocks) * vfs.f_frsize;
-}
-
-uint64_t HalStorage::usedBytes() {
-  struct statvfs vfs{};
-  const std::string root = configuredStorageRoot();
-  if (statvfs(root.c_str(), &vfs) != 0)
-    return 0;
-  return static_cast<uint64_t>(vfs.f_blocks - vfs.f_bfree) * vfs.f_frsize;
-}
-
 bool HalStorage::beginUsbDrive() { return false; }
 bool HalStorage::disconnectUsbDriveHost() { return false; }
 void HalStorage::endUsbDrive() {}
